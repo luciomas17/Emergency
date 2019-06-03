@@ -49,6 +49,4 @@ public class Evento implements Comparable<Evento>{
 		return String.format("Evento [ora=%s, tipo=%s, paziente=%s]", ora, tipo, paziente);
 	}
 	
-	
-	
 }

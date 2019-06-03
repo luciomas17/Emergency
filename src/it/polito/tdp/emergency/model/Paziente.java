@@ -19,9 +19,9 @@ public class Paziente {
 	private LocalTime oraArrivo ;
 	
 	public Paziente(int id, LocalTime oraArrivo) {
-		this.id = id ;
-		this.oraArrivo = oraArrivo ;
-		this.stato = StatoPaziente.NEW ;
+		this.id = id;
+		this.oraArrivo = oraArrivo;
+		this.stato = StatoPaziente.NEW;
 	}
 
 	public int getId() {
@@ -53,6 +53,4 @@ public class Paziente {
 		return String.format("Paziente [id=%s, stato=%s, oraArrivo=%s]", id, stato, oraArrivo);
 	}
 	
-	
-
 }
