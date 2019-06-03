@@ -3,6 +3,7 @@ package it.polito.tdp.emergency.model;
 import java.time.Duration;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -10,12 +11,30 @@ import it.polito.tdp.emergency.model.Evento.TipoEvento;
 import it.polito.tdp.emergency.model.Paziente.StatoPaziente;
 
 public class Simulatore {
+	
+	public class PrioritaPaziente implements Comparator<Paziente> {
+		@Override
+		public int compare(Paziente p1, Paziente p2) {
+			if(p1.getStato() == StatoPaziente.WAITING_RED && p2.getStato() != StatoPaziente.WAITING_RED)
+				return -1;
+			else if(p1.getStato() != StatoPaziente.WAITING_RED && p2.getStato() == StatoPaziente.WAITING_RED)
+				return 1;
+			
+			else if(p1.getStato() == StatoPaziente.WAITING_YELLOW && p2.getStato() != StatoPaziente.WAITING_YELLOW)
+				return -1;
+			else if(p1.getStato() != StatoPaziente.WAITING_YELLOW && p2.getStato() == StatoPaziente.WAITING_YELLOW)
+				return 1;
+			
+			return p1.getOraArrivo().compareTo(p2.getOraArrivo());
+		}
+	}
 
 	// Coda degli eventi
 	private PriorityQueue<Evento> queue = new PriorityQueue<>();
 
 	// Modello del Mondo
 	private List<Paziente> pazienti;
+	private PriorityQueue<Paziente> salaAttesa;
 	private int studiLiberi;
 
 	// Parametri di simulazione
@@ -41,6 +60,7 @@ public class Simulatore {
 
 	// Variabili interne
 	private StatoPaziente nuovoStatoPaziente;
+	private Duration intervalloPolling = Duration.ofMinutes(5);
 
 	public Simulatore() {
 		this.pazienti = new ArrayList<Paziente>();
@@ -56,10 +76,14 @@ public class Simulatore {
 
 			oraArrivo = oraArrivo.plus(T_ARRIVAL);
 		}
+		
+		// Inizializzare sala d'attesa vuota
+		salaAttesa = new PriorityQueue<>(new PrioritaPaziente());
 
 		// Creare gli studi medici
 		studiLiberi = NS;
-
+		
+		//
 		nuovoStatoPaziente = StatoPaziente.WAITING_WHITE;
 
 		// Creare gli eventi iniziali
@@ -67,6 +91,9 @@ public class Simulatore {
 		for (Paziente p : pazienti) {
 			queue.add(new Evento(p.getOraArrivo(), TipoEvento.ARRIVO, p));
 		}
+		
+		// Lanciare osservatore in polling
+		queue.add(new Evento(T_inizio.plus(intervalloPolling), TipoEvento.POLLING, null));
 
 		// Resettare le statistiche
 		numDimessi = 0;
@@ -98,31 +125,65 @@ public class Simulatore {
 					else if (p.getStato() == StatoPaziente.WAITING_RED)
 						queue.add(new Evento(ev.getOra().plusMinutes(TIMEOUT_RED), TipoEvento.TIMEOUT, p));
 	
+					salaAttesa.add(p);
 					ruotaNuovoStatoPaziente();
 	
 					break;
 	
 				case VISITA:
+					Paziente pazChiamato = salaAttesa.poll();
+					if(pazChiamato == null)
+						break;
+					
+					StatoPaziente vecchioStato = pazChiamato.getStato();
+					pazChiamato.setStato(StatoPaziente.TREATING);
+					
+					studiLiberi--;
+					
+					if(vecchioStato == StatoPaziente.WAITING_RED)
+						queue.add(new Evento(ev.getOra().plusMinutes(DURATION_RED), TipoEvento.CURATO, pazChiamato));
+					else if(vecchioStato == StatoPaziente.WAITING_YELLOW)
+						queue.add(new Evento(ev.getOra().plusMinutes(DURATION_YELLOW), TipoEvento.CURATO, pazChiamato));
+					else if(vecchioStato == StatoPaziente.WAITING_WHITE)
+						queue.add(new Evento(ev.getOra().plusMinutes(DURATION_WHITE), TipoEvento.CURATO, pazChiamato));
 
 					break;
 	
 				case CURATO:
+					p.setStato(StatoPaziente.OUT);
+					
+					numDimessi++;
+					
+					studiLiberi++;
+					queue.add(new Evento(ev.getOra(), TipoEvento.VISITA, null));
 					
 					break;
 	
 				case TIMEOUT:
+					salaAttesa.remove(p);
+					
 					if (p.getStato() == StatoPaziente.WAITING_WHITE) {
 						p.setStato(StatoPaziente.OUT);
 						numAbbandoni++ ;
 					} else if (p.getStato() == StatoPaziente.WAITING_YELLOW) {
 						p.setStato(StatoPaziente.WAITING_RED);
 						queue.add(new Evento(ev.getOra().plusMinutes(TIMEOUT_RED), TipoEvento.TIMEOUT, p));
+						salaAttesa.add(p);
 					} else if (p.getStato() == StatoPaziente.WAITING_RED) {
 						p.setStato(StatoPaziente.BLACK);
 						numMorti++ ;
 					} else
 						System.out.println("Timeout anomalo nello stato " + p.getStato());
 	
+					break;
+					
+				case POLLING:
+					if(!salaAttesa.isEmpty() && studiLiberi > 0)
+						queue.add(new Evento(ev.getOra(), TipoEvento.VISITA, null));
+					
+					if(ev.getOra().isBefore(T_fine))
+						queue.add(new Evento(ev.getOra().plus(intervalloPolling), TipoEvento.POLLING, null));
+					
 					break;
 			}
 
@@ -131,11 +192,36 @@ public class Simulatore {
 	}
 
 	private void ruotaNuovoStatoPaziente() {
-		if (nuovoStatoPaziente == StatoPaziente.WAITING_WHITE)
+		if(nuovoStatoPaziente == StatoPaziente.WAITING_WHITE)
 			nuovoStatoPaziente = StatoPaziente.WAITING_YELLOW;
-		else if (nuovoStatoPaziente == StatoPaziente.WAITING_YELLOW)
+		else if(nuovoStatoPaziente == StatoPaziente.WAITING_YELLOW)
 			nuovoStatoPaziente = StatoPaziente.WAITING_RED;
-		else if (nuovoStatoPaziente == StatoPaziente.WAITING_RED)
+		else if(nuovoStatoPaziente == StatoPaziente.WAITING_RED)
 			nuovoStatoPaziente = StatoPaziente.WAITING_WHITE;
 	}
+
+	public void setNS(int nS) {
+		NS = nS;
+	}
+
+	public void setNP(int nP) {
+		NP = nP;
+	}
+
+	public void setT_ARRIVAL(Duration t_ARRIVAL) {
+		T_ARRIVAL = t_ARRIVAL;
+	}
+
+	public int getNumDimessi() {
+		return numDimessi;
+	}
+
+	public int getNumAbbandoni() {
+		return numAbbandoni;
+	}
+
+	public int getNumMorti() {
+		return numMorti;
+	}
+	
 }
